@@ -46,13 +46,14 @@ fi
   git remote get-url bengl  >/dev/null 2>&1 || git remote add bengl  "$BENGL_REMOTE"
   git remote get-url shogun >/dev/null 2>&1 || git remote add shogun "$SHOGUN_REMOTE"
   git fetch origin main
-  git fetch bengl  ffi-fastcalls
+  # PR #63140's head branch is literally "bengl/ffi-fastcalls" on bengl's fork
+  git fetch bengl  bengl/ffi-fastcalls
   git fetch shogun fast-ffi
 )
 
-# 3. Worktrees for the two PR refs
+# 3. Worktrees for the two PR refs (remote/branch form: bengl/bengl/ffi-fastcalls)
 if [ ! -d "$SRC_ROOT/pr-63140" ]; then
-  (cd "$SRC_ROOT/main" && git worktree add "$SRC_ROOT/pr-63140" bengl/ffi-fastcalls)
+  (cd "$SRC_ROOT/main" && git worktree add "$SRC_ROOT/pr-63140" bengl/bengl/ffi-fastcalls)
 fi
 if [ ! -d "$SRC_ROOT/pr-63068" ]; then
   (cd "$SRC_ROOT/main" && git worktree add "$SRC_ROOT/pr-63068" shogun/fast-ffi)
