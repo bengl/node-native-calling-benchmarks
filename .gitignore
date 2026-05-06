@@ -1,0 +1,8 @@
+node_modules/
+vendor/
+results/
+lib/fixture/build/
+lib/native/build/
+addons/*/build/
+*.log
+.DS_Store
