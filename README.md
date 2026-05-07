@@ -43,6 +43,29 @@ npm run bench
 `npm run bench` prints a console table and writes a full per-sample JSON
 record to `results/<ISO-timestamp>.json`.
 
+### Quick runs
+
+A full run takes roughly an hour, almost all of it in `ffi-napi` (the
+slowest backend, by orders of magnitude). For a quick sanity check or
+when iterating on the suite itself, dial down via env vars:
+
+```bash
+# 1 sample per cell, 100k iterations per scenario (~1 min total)
+NCB_SAMPLES=1 NCB_N=100000 npm run bench
+
+# 2 samples, 1M iterations (~5 min total)
+NCB_SAMPLES=2 NCB_N=1000000 npm run bench
+```
+
+| Var           | Default                       | Effect                                 |
+|---------------|-------------------------------|----------------------------------------|
+| `NCB_N`       | 1e7 (1e6 for `sum-buffer`)    | Iterations per measurement window      |
+| `NCB_SAMPLES` | 5                             | Fresh-process samples per (backend, scenario) cell |
+| `NCB_SIZE`    | (per scenario, set by runner) | Buffer size for `sum-buffer` (bytes)   |
+
+Lowering `NCB_N` speeds up `ffi-napi` proportionally (it dominates total
+runtime). The ops/sec reported gets noisier but trends remain visible.
+
 ## Skipping the Node.js source build
 
 Building three Node.js variants takes ~30 minutes each. If you already have
