@@ -59,6 +59,29 @@ if [ ! -d "$SRC_ROOT/pr-63068" ]; then
   (cd "$SRC_ROOT/main" && git worktree add "$SRC_ROOT/pr-63068" shogun/fast-ffi)
 fi
 
+# 3b. Fast-forward existing PR worktrees to their latest tracking ref so a
+# subsequent rebuild picks up new commits. If they've diverged or had local
+# edits, leave them alone and warn.
+sync_worktree() {
+  local worktree="$1" remote_ref="$2" outdir="$3"
+  local current upstream
+  current=$(cd "$worktree" && git rev-parse HEAD)
+  upstream=$(cd "$SRC_ROOT/main" && git rev-parse "$remote_ref")
+  if [ "$current" = "$upstream" ]; then
+    return 0
+  fi
+  if (cd "$worktree" && git merge-base --is-ancestor "$current" "$upstream"); then
+    echo "[setup-nodes] $worktree: fast-forwarding $current -> $upstream"
+    (cd "$worktree" && git reset --hard "$upstream")
+    rm -f "$outdir/node"
+  else
+    echo "[setup-nodes] $worktree: HEAD has diverged from $remote_ref; not touching"
+  fi
+}
+sync_worktree "$SRC_ROOT/pr-63140" bengl/bengl/ffi-fastcalls "$OUT_ROOT/node-pr-63140"
+sync_worktree "$SRC_ROOT/pr-63068" shogun/fast-ffi             "$OUT_ROOT/node-pr-63068"
+sync_worktree "$SRC_ROOT/main"     origin/main                  "$OUT_ROOT/node-main"
+
 # 4. Build each variant
 build_variant "node-main"     "main"           "$SRC_ROOT/main"     "$OUT_ROOT/node-main"     "NODE_MAIN"
 build_variant "node-pr-63140" "ffi-fastcalls"  "$SRC_ROOT/pr-63140" "$OUT_ROOT/node-pr-63140" "NODE_PR_63140"
