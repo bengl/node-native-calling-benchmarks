@@ -6,3 +6,4 @@ lib/native/build/
 addons/*/build/
 *.log
 .DS_Store
+.claude/
