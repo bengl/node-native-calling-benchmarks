@@ -59,24 +59,26 @@ if [ ! -d "$SRC_ROOT/pr-63068" ]; then
   (cd "$SRC_ROOT/main" && git worktree add "$SRC_ROOT/pr-63068" shogun/fast-ffi)
 fi
 
-# 3b. Fast-forward existing PR worktrees to their latest tracking ref so a
-# subsequent rebuild picks up new commits. If they've diverged or had local
-# edits, leave them alone and warn.
+# 3b. Sync existing worktrees to their latest tracking ref so a subsequent
+# rebuild picks up new commits. PR branches get force-pushed (rebased onto
+# new main) often, so we accept any non-ancestor update as long as the
+# worktree has no uncommitted changes. If it does, leave it alone and warn.
 sync_worktree() {
   local worktree="$1" remote_ref="$2" outdir="$3"
-  local current upstream
+  local current upstream dirty
   current=$(cd "$worktree" && git rev-parse HEAD)
   upstream=$(cd "$SRC_ROOT/main" && git rev-parse "$remote_ref")
   if [ "$current" = "$upstream" ]; then
     return 0
   fi
-  if (cd "$worktree" && git merge-base --is-ancestor "$current" "$upstream"); then
-    echo "[setup-nodes] $worktree: fast-forwarding $current -> $upstream"
-    (cd "$worktree" && git reset --hard "$upstream")
-    rm -f "$outdir/node"
-  else
-    echo "[setup-nodes] $worktree: HEAD has diverged from $remote_ref; not touching"
+  dirty=$(cd "$worktree" && git status --porcelain)
+  if [ -n "$dirty" ]; then
+    echo "[setup-nodes] $worktree: has uncommitted changes; not touching"
+    return 0
   fi
+  echo "[setup-nodes] $worktree: syncing $current -> $upstream"
+  (cd "$worktree" && git reset --hard "$upstream")
+  rm -f "$outdir/node"
 }
 sync_worktree "$SRC_ROOT/pr-63140" bengl/bengl/ffi-fastcalls "$OUT_ROOT/node-pr-63140"
 sync_worktree "$SRC_ROOT/pr-63068" shogun/fast-ffi             "$OUT_ROOT/node-pr-63068"
