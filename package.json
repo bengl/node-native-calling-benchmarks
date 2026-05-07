@@ -13,6 +13,7 @@
     "setup:fixture": "bash scripts/build-fixture.sh",
     "setup:addons": "bash scripts/build-addons.sh",
     "bench": "bash scripts/run.sh",
+    "format": "node scripts/format-results.js",
     "test": "node --test tests/"
   },
   "devDependencies": {

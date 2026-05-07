@@ -43,6 +43,17 @@ npm run bench
 `npm run bench` prints a console table and writes a full per-sample JSON
 record to `results/<ISO-timestamp>.json`.
 
+### Re-rendering existing results
+
+```bash
+npm run format -- --latest             # padded text, latest results file
+npm run format -- --md --latest        # markdown table (good for PRs / Slack)
+npm run format -- --csv results/foo.json
+```
+
+`--latest` resolves to the newest `results/*.json`. Pass an explicit path
+to format an older run.
+
 ### Quick runs
 
 A full run takes roughly an hour, almost all of it in `ffi-napi` (the
