@@ -2,91 +2,86 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC_ROOT="${REPO_ROOT}/vendor/node-src"
+SRC="${REPO_ROOT}/vendor/node-src"
 OUT_ROOT="${REPO_ROOT}/vendor"
+STATE_DIR="${REPO_ROOT}/vendor/state"
 
 NODEJS_REMOTE="https://github.com/nodejs/node"
 BENGL_REMOTE="https://github.com/bengl/node"
 SHOGUN_REMOTE="https://github.com/ShogunPanda/node"
 
-# (id, ref, source-worktree, output-dir, env-var-override)
+read_state() {
+  cat "$STATE_DIR/$1.sha" 2>/dev/null || true
+}
+
+write_state() {
+  mkdir -p "$STATE_DIR"
+  echo "$2" > "$STATE_DIR/$1.sha"
+}
+
+# Build a single variant: check out its upstream commit, configure, build,
+# copy the binary out to vendor/<id>/node, record the built commit.
 build_variant() {
-  local id="$1" ref="$2" worktree="$3" outdir="$4" envvar="$5"
+  local id="$1" ref="$2" envvar="$3"
+  local outdir="$OUT_ROOT/$id"
 
   if [ -n "${!envvar:-}" ]; then
     echo "[setup-nodes] $id: using $envvar=${!envvar}, skipping build"
     return 0
   fi
 
-  if [ -x "${outdir}/node" ]; then
-    echo "[setup-nodes] $id: ${outdir}/node already present, skipping build"
+  local upstream
+  upstream=$(cd "$SRC" && git rev-parse "$ref")
+
+  local last_built
+  last_built=$(read_state "$id")
+
+  if [ "$last_built" = "$upstream" ] && [ -x "$outdir/node" ]; then
+    echo "[setup-nodes] $id: $upstream already built, skipping"
     return 0
   fi
 
+  local dirty
+  dirty=$(cd "$SRC" && git status --porcelain)
+  if [ -n "$dirty" ]; then
+    echo "[setup-nodes] $id: $SRC has uncommitted changes; aborting" >&2
+    exit 1
+  fi
+
+  echo "[setup-nodes] $id: checking out $upstream"
+  (cd "$SRC" && git checkout --detach --quiet "$upstream")
+
   echo "[setup-nodes] $id: configuring..."
-  (cd "$worktree" && ./configure --ninja)
+  (cd "$SRC" && ./configure --ninja)
   echo "[setup-nodes] $id: building (this takes ~30 minutes)..."
-  (cd "$worktree" && ninja -C out/Release node)
+  (cd "$SRC" && ninja -C out/Release node)
 
   mkdir -p "$outdir"
-  cp "$worktree/out/Release/node" "$outdir/node"
-  echo "[setup-nodes] $id: built -> $outdir/node"
+  cp "$SRC/out/Release/node" "$outdir/node"
+  write_state "$id" "$upstream"
+  echo "[setup-nodes] $id: built -> $outdir/node @ $upstream"
 }
 
-# 1. Clone main if needed
-if [ ! -d "$SRC_ROOT/main" ]; then
-  echo "[setup-nodes] cloning nodejs/node into $SRC_ROOT/main ..."
-  mkdir -p "$SRC_ROOT"
-  git clone "$NODEJS_REMOTE" "$SRC_ROOT/main"
+# Step 1: clone if missing
+if [ ! -d "$SRC" ]; then
+  echo "[setup-nodes] cloning nodejs/node into $SRC ..."
+  mkdir -p "$(dirname "$SRC")"
+  git clone "$NODEJS_REMOTE" "$SRC"
 fi
 
-# 2. Add remotes & fetch refs
+# Step 2: remotes & fetch
 (
-  cd "$SRC_ROOT/main"
+  cd "$SRC"
   git remote get-url bengl  >/dev/null 2>&1 || git remote add bengl  "$BENGL_REMOTE"
   git remote get-url shogun >/dev/null 2>&1 || git remote add shogun "$SHOGUN_REMOTE"
   git fetch origin main
-  # PR #63140's head branch is literally "bengl/ffi-fastcalls" on bengl's fork
   git fetch bengl  bengl/ffi-fastcalls
   git fetch shogun fast-ffi
 )
 
-# 3. Worktrees for the two PR refs (remote/branch form: bengl/bengl/ffi-fastcalls)
-if [ ! -d "$SRC_ROOT/pr-63140" ]; then
-  (cd "$SRC_ROOT/main" && git worktree add "$SRC_ROOT/pr-63140" bengl/bengl/ffi-fastcalls)
-fi
-if [ ! -d "$SRC_ROOT/pr-63068" ]; then
-  (cd "$SRC_ROOT/main" && git worktree add "$SRC_ROOT/pr-63068" shogun/fast-ffi)
-fi
-
-# 3b. Sync existing worktrees to their latest tracking ref so a subsequent
-# rebuild picks up new commits. PR branches get force-pushed (rebased onto
-# new main) often, so we accept any non-ancestor update as long as the
-# worktree has no uncommitted changes. If it does, leave it alone and warn.
-sync_worktree() {
-  local worktree="$1" remote_ref="$2" outdir="$3"
-  local current upstream dirty
-  current=$(cd "$worktree" && git rev-parse HEAD)
-  upstream=$(cd "$SRC_ROOT/main" && git rev-parse "$remote_ref")
-  if [ "$current" = "$upstream" ]; then
-    return 0
-  fi
-  dirty=$(cd "$worktree" && git status --porcelain)
-  if [ -n "$dirty" ]; then
-    echo "[setup-nodes] $worktree: has uncommitted changes; not touching"
-    return 0
-  fi
-  echo "[setup-nodes] $worktree: syncing $current -> $upstream"
-  (cd "$worktree" && git reset --hard "$upstream")
-  rm -f "$outdir/node"
-}
-sync_worktree "$SRC_ROOT/pr-63140" bengl/bengl/ffi-fastcalls "$OUT_ROOT/node-pr-63140"
-sync_worktree "$SRC_ROOT/pr-63068" shogun/fast-ffi             "$OUT_ROOT/node-pr-63068"
-sync_worktree "$SRC_ROOT/main"     origin/main                  "$OUT_ROOT/node-main"
-
-# 4. Build each variant
-build_variant "node-main"     "main"           "$SRC_ROOT/main"     "$OUT_ROOT/node-main"     "NODE_MAIN"
-build_variant "node-pr-63140" "ffi-fastcalls"  "$SRC_ROOT/pr-63140" "$OUT_ROOT/node-pr-63140" "NODE_PR_63140"
-build_variant "node-pr-63068" "fast-ffi"       "$SRC_ROOT/pr-63068" "$OUT_ROOT/node-pr-63068" "NODE_PR_63068"
+# Step 3: build each variant sequentially in the single source tree
+build_variant "node-main"     "origin/main"               "NODE_MAIN"
+build_variant "node-pr-63140" "bengl/bengl/ffi-fastcalls" "NODE_PR_63140"
+build_variant "node-pr-63068" "shogun/fast-ffi"           "NODE_PR_63068"
 
 echo "[setup-nodes] done."
