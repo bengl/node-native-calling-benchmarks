@@ -23,10 +23,51 @@ source, separately compiled per backend.
 
 ## Requirements
 
-- Linux or macOS (no Windows support).
-- A C/C++ toolchain (`cc`/`clang`/`g++`, `make`).
-- [`nvm`](https://github.com/nvm-sh/nvm) — required because `ffi-napi` is incompatible with current LTS Node releases. The repo pins **Node 20.10.0** via `.nvmrc` (the last version before the `node_api_basic_finalize` ABI change broke `ffi-napi`'s build). All system-Node backends run on this pinned version.
-- ~10 GB free disk + ~90 minutes for building the three Node.js variants from source.
+### Operating system
+
+Linux or macOS. No Windows support.
+
+### Toolchain
+
+| Tool       | Used by                                         |
+|------------|-------------------------------------------------|
+| `git`      | cloning the repo and fetching PR refs           |
+| `cc`/`clang`, `c++`/`clang++` | fixture library + four native addons |
+| `make`     | fixture library Makefile                        |
+| `ninja`    | building the three Node.js variants             |
+| `python3`  | Node.js's gyp build system                      |
+| [`nvm`](https://github.com/nvm-sh/nvm) | installing the pinned Node version |
+
+The repo pins **Node 20.10.0** via `.nvmrc`. This pin is required because
+`ffi-napi@4.0.3` does not build on Node ≥ 20.18 or ≥ 22.6 due to the
+`node_api_basic_finalize` ABI change; 20.10.0 is the last version where
+the package builds cleanly. All system-Node backends (`koffi`,
+`ffi-napi`, the four addons) run under this pinned version.
+
+#### Install on macOS
+
+```bash
+xcode-select --install         # cc, clang, c++, make, git
+brew install ninja python3
+# nvm: see https://github.com/nvm-sh/nvm#installing-and-updating
+```
+
+#### Install on Linux (Debian / Ubuntu)
+
+```bash
+sudo apt-get install -y build-essential ninja-build python3 git
+# nvm: see https://github.com/nvm-sh/nvm#installing-and-updating
+```
+
+(For Fedora / Arch / etc., install the equivalents: `gcc`, `gcc-c++`,
+`make`, `ninja-build` / `ninja`, `python3`, `git`.)
+
+### Disk and time
+
+- ~10 GB free disk for the three Node.js source trees + builds.
+- ~30 minutes per Node.js variant on a typical laptop = ~90 minutes
+  total for `npm run setup:nodes`. Skippable per-variant via env-var
+  override (see below).
 
 ## Quick start
 
