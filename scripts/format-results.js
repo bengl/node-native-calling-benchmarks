@@ -61,11 +61,33 @@ function cellValue(r) {
   return fmtNum(r.median);
 }
 
+function winnerBackends(sc) {
+  let best = -Infinity;
+  const winners = new Set();
+  for (const b of backendIds) {
+    const r = lookup.get(`${b}|${sc}`);
+    if (!r || r.status === 'error') continue;
+    if (r.median > best) {
+      best = r.median;
+      winners.clear();
+    }
+    if (r.median === best) winners.add(b);
+  }
+  return winners;
+}
+
+function cellValueWithMarker(sc, b) {
+  const r = lookup.get(`${b}|${sc}`);
+  const value = cellValue(r);
+  const winners = winnerBackends(sc);
+  return `${value}${winners.has(b) ? '*' : ' '}`;
+}
+
 function printText() {
   const header = ['Scenario', ...backendIds];
   const data = scenarioRows.map((sc) => {
     const row = [sc];
-    for (const b of backendIds) row.push(cellValue(lookup.get(`${b}|${sc}`)));
+    for (const b of backendIds) row.push(cellValueWithMarker(sc, b));
     return row;
   });
   const widths = header.map((_, col) =>
@@ -80,13 +102,24 @@ function printText() {
 
 function printMarkdown() {
   const header = ['Scenario', ...backendIds];
-  console.log('| ' + header.join(' | ') + ' |');
-  console.log('|' + header.map((h, i) => i === 0 ? '---' : '---:').map((s) => ' ' + s + ' ').join('|') + '|');
-  for (const sc of scenarioRows) {
+  const data = scenarioRows.map((sc) => {
     const row = [sc];
-    for (const b of backendIds) row.push(cellValue(lookup.get(`${b}|${sc}`)));
-    console.log('| ' + row.join(' | ') + ' |');
-  }
+    for (const b of backendIds) row.push(cellValueWithMarker(sc, b));
+    return row;
+  });
+  const widths = header.map((_, col) =>
+    Math.max(header[col].length, ...data.map((r) => r[col].length)),
+  );
+  const padCell = (cell, col) => col === 0 ? cell.padEnd(widths[col]) : cell.padStart(widths[col]);
+  const fmtRow = (r) => '| ' + r.map(padCell).join(' | ') + ' |';
+  const separator = widths.map((width, col) => {
+    if (col === 0) return '-'.repeat(Math.max(3, width));
+    return '-'.repeat(Math.max(2, width - 1)) + ':';
+  });
+
+  console.log(fmtRow(header));
+  console.log(fmtRow(separator));
+  for (const r of data) console.log(fmtRow(r));
 }
 
 function printCsv() {

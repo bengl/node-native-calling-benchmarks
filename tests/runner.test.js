@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { aggregate, formatTable } = require('../lib/runner');
+const { aggregate, backendMatchesFilter, formatTable, parseBackendFilter, resolveExecutable } = require('../lib/runner');
 
 test('aggregate computes min/median/max per (backend, scenario, params) cell', () => {
   const samples = [
@@ -47,4 +47,25 @@ test('formatTable produces a string with backend column headers', () => {
   assert.match(table, /\ba\b/);
   assert.match(table, /\bb\b/);
   assert.match(table, /\bx\b/);
+});
+
+test('parseBackendFilter parses comma-separated backend ids', () => {
+  assert.deepStrictEqual(parseBackendFilter('core-ffi-main, ffi-rs,,koffi'), [
+    'core-ffi-main',
+    'ffi-rs',
+    'koffi',
+  ]);
+});
+
+test('backendMatchesFilter supports exact and prefix matches', () => {
+  assert.strictEqual(backendMatchesFilter('core-ffi-main', []), true);
+  assert.strictEqual(backendMatchesFilter('core-ffi-main', ['core-ffi-main']), true);
+  assert.strictEqual(backendMatchesFilter('core-ffi-main', ['core-ffi']), true);
+  assert.strictEqual(backendMatchesFilter('ffi-rs', ['core-ffi']), false);
+});
+
+test('resolveExecutable resolves absolute paths and PATH entries', () => {
+  assert.strictEqual(resolveExecutable(process.execPath), process.execPath);
+  assert.ok(resolveExecutable(process.platform === 'win32' ? 'node.exe' : 'node'));
+  assert.strictEqual(resolveExecutable('definitely-not-a-real-ncb-binary'), null);
 });
