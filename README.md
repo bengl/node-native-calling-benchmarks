@@ -1,6 +1,6 @@
 # node-native-calling-benchmarks
 
-Compares operations-per-second across nine ways of calling native code from Node.js:
+Compares operations-per-second across twelve ways of calling native code from JavaScript runtimes:
 
 | Backend          | Mechanism                                       |
 |------------------|-------------------------------------------------|
@@ -9,17 +9,26 @@ Compares operations-per-second across nine ways of calling native code from Node
 | `core-ffi-63068` | `node:ffi` on PR #63068 (`ShogunPanda:fast-ffi`)|
 | `koffi`          | userland FFI (npm `koffi`)                      |
 | `ffi-napi`       | userland FFI (npm `ffi-napi`)                   |
+| `ffi-rs`         | userland FFI (npm `ffi-rs`)                     |
+| `deno`           | Deno native FFI                                 |
+| `bun`            | Bun native FFI                                  |
 | `napi-c`         | N-API addon, C                                  |
 | `napi-cpp`       | N-API addon, C++ via `node-addon-api`           |
 | `addon-nan`      | non-N-API addon via NAN                         |
 | `addon-raw`      | non-N-API addon, raw `<v8.h>`                   |
 
-All backends run the same six scenarios from `nodejs/node:benchmark/ffi/`:
+Every backend runs the original six scenarios from `nodejs/node:benchmark/ffi/`:
 `add-i32`, `add-f64`, `getpid`, `many-args`, `pointer-bigint`, and
-`sum-buffer` (with sizes 64/1024/16384). The C-level workload is defined
-once in `lib/native/scenarios.h` (header-only `static inline` functions)
-and reused by both the FFI fixture library and every native addon. Same
-source, separately compiled per backend.
+`sum-buffer` (with sizes 64/1024/16384). Backends also run the additional
+non-duplicate primitive and string workloads imported from `ffi-tests` when
+the provider supports the required C types:
+`noop-void`, `identity-i32`, `add-i8`, `add-u8`, `add-i16`, `add-u16`,
+`add-i64`, `add-u64`, `add-f32`, `sum-3-i32`, `sum-5-i32`, `sum-8-i32`,
+`string-length`, `string-first-char`, and `string-equals-hello`.
+
+The C-level workload is defined once in `lib/native/scenarios.h`
+(header-only `static inline` functions) and reused by both the FFI fixture
+library and every native addon. Same source, separately compiled per backend.
 
 ## Requirements
 
@@ -37,18 +46,24 @@ Linux or macOS. No Windows support.
 | `ninja`    | building the three Node.js variants             |
 | `python3`  | Node.js's gyp build system                      |
 | [`nvm`](https://github.com/nvm-sh/nvm) | installing the pinned Node version |
+| `deno`     | optional, running the `deno` backend            |
+| `bun`      | optional, running the `bun` backend             |
 
 The repo pins **Node 20.10.0** via `.nvmrc`. This pin is required because
 `ffi-napi@4.0.3` does not build on Node ≥ 20.18 or ≥ 22.6 due to the
 `node_api_basic_finalize` ABI change; 20.10.0 is the last version where
 the package builds cleanly. All system-Node backends (`koffi`,
-`ffi-napi`, the four addons) run under this pinned version.
+`ffi-napi`, `ffi-rs`, the four addons) run under this pinned version.
+The `deno` and `bun` backends use the `deno` and `bun` executables found on
+`PATH` unless overridden with `DENO` or `BUN`.
 
 #### Install on macOS
 
 ```bash
 xcode-select --install         # cc, clang, c++, make, git
 brew install ninja python3
+# optional runtime backends:
+# brew install deno bun
 # nvm: see https://github.com/nvm-sh/nvm#installing-and-updating
 ```
 
@@ -56,6 +71,7 @@ brew install ninja python3
 
 ```bash
 sudo apt-get install -y build-essential ninja-build python3 git
+# optional runtime backends: install deno/bun from their upstream installers
 # nvm: see https://github.com/nvm-sh/nvm#installing-and-updating
 ```
 
@@ -81,19 +97,21 @@ npm run setup      # builds 3 Node.js variants + fixture library + 4 addons
 npm run bench
 ```
 
-`npm run bench` prints a console table and writes a full per-sample JSON
-record to `results/<ISO-timestamp>.json`.
+`npm run bench` prints an aligned console table and writes a full per-sample
+JSON record to `results/<ISO-timestamp>.json`. The fastest successful backend
+for each scenario row is marked with `*`.
 
 ### Re-rendering existing results
 
 ```bash
 npm run format -- --latest             # padded text, latest results file
-npm run format -- --md --latest        # markdown table (good for PRs / Slack)
+npm run format -- --md --latest        # aligned markdown table (good for PRs / Slack)
 npm run format -- --csv results/foo.json
 ```
 
 `--latest` resolves to the newest `results/*.json`. Pass an explicit path
-to format an older run.
+to format an older run. Text and Markdown output mark per-row winners with
+`*`; CSV keeps raw cell values for machine consumption.
 
 ### Quick runs
 
@@ -114,9 +132,21 @@ NCB_SAMPLES=2 NCB_N=1000000 npm run bench
 | `NCB_N`       | 1e7 (1e6 for `sum-buffer`)    | Iterations per measurement window      |
 | `NCB_SAMPLES` | 5                             | Fresh-process samples per (backend, scenario) cell |
 | `NCB_SIZE`    | (per scenario, set by runner) | Buffer size for `sum-buffer` (bytes)   |
+| `NCB_BACKENDS` | all backends                  | Comma-separated backend IDs or prefixes |
+| `DENO`        | `deno` from `PATH`            | Override executable for the `deno` backend |
+| `BUN`         | `bun` from `PATH`             | Override executable for the `bun` backend |
 
 Lowering `NCB_N` speeds up `ffi-napi` proportionally (it dominates total
 runtime). The ops/sec reported gets noisier but trends remain visible.
+
+Run only selected backends with exact IDs or prefixes:
+
+```bash
+NCB_BACKENDS=core-ffi npm run bench              # all core-ffi variants
+NCB_BACKENDS=core-ffi-main,ffi-rs npm run bench  # exact backend IDs
+NCB_BACKENDS=deno,bun npm run bench              # runtime FFI backends
+DENO=/opt/deno/bin/deno NCB_BACKENDS=deno npm run bench
+```
 
 ## Skipping the Node.js source build
 
@@ -131,7 +161,7 @@ export NODE_PR_63068=/path/to/third/node
 ```
 
 The runner uses these paths directly. Backends with neither a vendored binary
-nor an env var are silently skipped (their column shows `-` / `ERR`).
+nor an env var are reported as `ERR` in the output table.
 
 You can also run partial setup:
 
@@ -148,9 +178,9 @@ npm test
 ```
 
 Runs node:test against the harness, runner aggregation, and per-backend
-smoke tests for the userland-FFI and addon backends. Tests skip
-automatically for backends whose addons or the fixture library aren't
-yet built.
+smoke tests. Deno and Bun smoke tests skip automatically when the runtime
+binary is not installed. Addon and FFI smoke tests skip automatically when
+their addon binary or the fixture library is not built.
 
 ## Reproducibility notes
 
@@ -170,14 +200,22 @@ processes. For more stable numbers:
   wrappers around `scenarios.h`, with the symbol names `add_i32`,
   `add_f64`, etc. that the FFI backends `dlopen`.
 - The four addons each `#include "scenarios.h"` directly. No `dlopen`
-  hop, no separate library — same source code, separately compiled.
+  hop, no separate library - same source code, separately compiled.
+- The `deno` and `bun` backends use ESM benchmark scripts and their runtime
+  FFI APIs. They load the same fixture library as the Node FFI backends.
 - The `pointer-bigint` scenario passes a real `Buffer.alloc(8)` rather
   than a constant BigInt (a deviation from upstream Node's
   `benchmark/ffi/pointer-bigint.js`). Each backend extracts the buffer's
   address using its own idiom; the FFI cost being measured is unchanged.
+- The `core-ffi` extra benchmark dispatcher uses direct per-scenario call
+  sites instead of spreading an argument array. This preserves V8 Fast API
+  call paths in the experimental Node variants.
 - `getpid` is the one minor asymmetry: FFI backends call the host
   process's `getpid`/`uv_os_getpid` symbol; addon backends call
   `getpid()` from `<unistd.h>`. Both wrap the same syscall.
+- `ffi-rs` does not expose every C type represented in the additional
+  `ffi-tests` workload set, so `add-i8`, `add-u16`, and `add-f32` are
+  omitted for that backend.
 - Some backends return `u64` values as JS `Number` (when ≤
   `Number.MAX_SAFE_INTEGER`) and others as `BigInt`. The harness's
   sanity-check accepts either for integer values.
@@ -192,16 +230,18 @@ processes. For more stable numbers:
   fork or a dependency replacement.
 - **NAN is in maintenance mode.** Included for historical completeness;
   many production addons still use it.
+- **Deno/Bun are optional.** If `deno` or `bun` is unavailable, their backend
+  rows report `ERR` in full benchmark runs and their smoke tests skip.
 
 ## Layout
 
 ```
 lib/native/scenarios.h       # single source of truth for the workloads
 lib/fixture/                 # FFI shared library wrapping scenarios.h
-lib/harness.js               # ops/sec measurement (used by every script)
+lib/harness.js               # ops/sec measurement for Node-hosted scripts
 lib/runner.js                # spawns the matrix, aggregates, prints, writes JSON
 lib/backends.js              # backend definitions (id, binary, scenarios)
-benchmarks/<backend>/*.js    # per-backend scenario implementations
+benchmarks/<backend>/*.{js,mjs} # per-backend scenario implementations
 addons/<addon>/              # native addon sources + binding.gyp
 scripts/                     # setup-nodes.sh, build-fixture.sh, build-addons.sh, run.sh
 results/                     # gitignored; one JSON per `npm run bench`
